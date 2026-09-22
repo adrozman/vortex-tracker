@@ -4,3 +4,5 @@ fvuns_reader_transfer/*
 experimental_figures_to_compare_to
 *.h5
 *.npy
+__pycache__/
+*/__pycache__/

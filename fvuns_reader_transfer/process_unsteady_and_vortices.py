@@ -178,14 +178,14 @@ def process_unsteady_and_vortices(
             Q_snapshots.append(q_grid)
 
             # Vortex core detection using sub-pixel quadratic peak search and FWHM spoke sampling:
-            tip_line_z = -0.33 * X_rot + 0.02
+            # Rotor blade tip path line: approx Z_rot = -0.33 * X_rot - 0.005
+            # We set the ROI lower boundary slightly below the blade tip line (-0.01) so tip vortices
+            # formed along the tip path (down to X/D = -0.35) are completely captured without clipping.
+            tip_line_z = -0.33 * X_rot - 0.01
             roi_mask = (q_grid > q_threshold) & (Z_rot > tip_line_z) & (X_rot > -0.35) & (X_rot < 0.12)
             labeled_array, num_features = label(roi_mask)
 
             step_ellipses = []
-            num_spokes = 16
-            spoke_angles = np.linspace(0, 2 * np.pi, num_spokes, endpoint=False)
-            r_search = np.linspace(0, 1.2, 100)  # search up to 1.2 inches radius
 
             for feat in range(1, num_features + 1):
                 mask = (labeled_array == feat)
@@ -332,6 +332,10 @@ def process_unsteady_and_vortices(
 
     # 4. Vortex Tracking Across Timesteps
     print("\nTracking vortex trajectories across timesteps...")
+    dt_nominal = float(np.median(np.diff(timesteps))) if len(timesteps) > 1 else 1.0
+    if dt_nominal <= 0:
+        dt_nominal = 1.0
+
     raw_tracks = []
     for t_idx, detections in enumerate(vortex_detections_per_step):
         t = timesteps[t_idx]
@@ -342,9 +346,9 @@ def process_unsteady_and_vortices(
             unmatched = list(detections)
             for tr in raw_tracks:
                 last_det = tr[-1]
-                dt_steps = (t - last_det['time']) / 18.0 if len(timesteps) > 1 else 1.0
-                dt_steps = max(dt_steps, 1.0)
-                if dt_steps > 2.5:
+                dt_frames = (t - last_det['time']) / dt_nominal
+                dt_frames = max(dt_frames, 1.0)
+                if dt_frames > 3.0:
                     continue
                 last_x, last_z = last_det['center']
                 best_idx = None
@@ -355,7 +359,7 @@ def process_unsteady_and_vortices(
                     dz_cand = cand_z - last_z
                     dist = np.sqrt(dx_cand**2 + dz_cand**2)
                     # Relaxed convection bounds: downstream movement
-                    if -0.01 <= dx_cand <= 0.08 * dt_steps and abs(dz_cand) <= 0.06 * dt_steps:
+                    if -0.01 <= dx_cand <= 0.08 * dt_frames and abs(dz_cand) <= 0.06 * dt_frames:
                         if dist < best_dist:
                             best_dist = dist
                             best_idx = cand_idx

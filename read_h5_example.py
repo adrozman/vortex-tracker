@@ -1,14 +1,7 @@
 import h5py
 import numpy as np
 
-import os
-import sys
-
-h5_path = sys.argv[1] if len(sys.argv) > 1 else "velocity_and_vortex_data.h5"
-if not os.path.exists(h5_path):
-    fallback = os.path.join(os.path.dirname(__file__), "velocity_and_vortex_data.h5")
-    if os.path.exists(fallback):
-        h5_path = fallback
+h5_path = "velocity_and_vortex_data.h5"
 
 print(f"Opening {h5_path}...")
 with h5py.File(h5_path, 'r') as f:

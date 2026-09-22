@@ -6,13 +6,13 @@ import argparse
 import time
 import numpy as np
 import h5py
-from scipy.interpolate import LinearNDInterpolator, RegularGridInterpolator
+from scipy.interpolate import LinearNDInterpolator
 from scipy.spatial import Delaunay
 from scipy.ndimage import label
 
 # Local import
 from fvuns_reader import read_fvuns
-from ellipse_fit import fit_ellipse_moments, extract_vortex_swirl_ellipse
+from ellipse_fit import fit_ellipse_moments
 
 def process_unsteady_and_vortices(
     input_pattern="coviz/pivplane_*.fvuns",
@@ -104,11 +104,6 @@ def process_unsteady_and_vortices(
     X_rot = (-XX / rotor_diam) * np.cos(theta) - (ZZ / rotor_diam) * np.sin(theta)
     Z_rot = (-XX / rotor_diam) * np.sin(theta) + (ZZ / rotor_diam) * np.cos(theta)
 
-    def rot_to_mesh(xr, zr):
-        xm = -rotor_diam * (xr * np.cos(theta) + zr * np.sin(theta))
-        zm = rotor_diam * (-xr * np.sin(theta) + zr * np.cos(theta))
-        return xm, zm
-
     # Q scaling constant: convert non-dim Q to dimensional 1/s^2
     q_scale = (sound_speed / length_scale) ** 2
 
@@ -182,42 +177,122 @@ def process_unsteady_and_vortices(
             q_grid = interp_q(query_points).reshape((nx, nz))
             Q_snapshots.append(q_grid)
 
-            # Build fast regular grid interpolators for radial cuts
-            interp_u_grid = RegularGridInterpolator((x_lin, z_lin), u_grid, bounds_error=False, fill_value=0.0)
-            interp_w_grid = RegularGridInterpolator((x_lin, z_lin), w_grid, bounds_error=False, fill_value=0.0)
-
-            # Vortex core detection:
-            # Rotor blade tip path line: approx Z_rot = -0.33 * X_rot + 0.02
-            # Wake region above blade: Z_rot > -0.33 * X_rot + 0.02, X_rot in [-0.28, 0.10]
-            tip_line_z = -0.33 * X_rot + 0.02
-            roi_mask = (q_grid > q_threshold) & (Z_rot > tip_line_z) & (X_rot > -0.28) & (X_rot < 0.10)
+            # Vortex core detection using sub-pixel quadratic peak search and FWHM spoke sampling:
+            # Rotor blade tip path line: approx Z_rot = -0.33 * X_rot - 0.005
+            # We set the ROI lower boundary slightly below the blade tip line (-0.01) so tip vortices
+            # formed along the tip path (down to X/D = -0.35) are completely captured without clipping.
+            tip_line_z = -0.33 * X_rot - 0.01
+            roi_mask = (q_grid > q_threshold) & (Z_rot > tip_line_z) & (X_rot > -0.35) & (X_rot < 0.12)
             labeled_array, num_features = label(roi_mask)
 
             step_ellipses = []
+
             for feat in range(1, num_features + 1):
                 mask = (labeled_array == feat)
-                if np.sum(mask) < 20:  # ignore tiny noise artifacts
+                if np.sum(mask) < 15:  # filter noise artifacts
                     continue
-                q_feat = np.where(mask, q_grid, -np.inf)
-                max_idx = np.unravel_index(np.argmax(q_feat), q_feat.shape)
-                xc_q = X_rot[max_idx]
-                zc_q = Z_rot[max_idx]
 
-                cand = extract_vortex_swirl_ellipse(
-                    interp_u_grid, interp_w_grid, xc_q, zc_q, rot_to_mesh,
-                    rotor_diam=rotor_diam, s_max_inches=1.2, num_angles=8
-                )
+                # Sub-pixel peak search
+                sub_q = np.where(mask, q_grid, -1e9)
+                ix, iz = np.unravel_index(np.argmax(sub_q), q_grid.shape)
 
-                # Validation: genuine tip vortex must have distinct swirl velocity,
-                # reasonable aspect ratio, and physical core dimensions
-                if (cand['mean_swirl'] >= 0.8 * u_inf_nondim and
-                    cand['aspect_ratio'] <= 3.0 and
-                    cand['semi_minor'] >= 0.010 and
-                    cand['semi_major'] <= 0.08):
-                    cand['time'] = current_time
-                    xm_c, zm_c = rot_to_mesh(cand['center'][0], cand['center'][1])
-                    cand['mesh_center'] = (xm_c, zm_c)
-                    step_ellipses.append(cand)
+                if 1 <= ix < q_grid.shape[0] - 1 and 1 <= iz < q_grid.shape[1] - 1:
+                    patch_q = q_grid[ix-1:ix+2, iz-1:iz+2]
+                    dq_dx = (patch_q[2, 1] - patch_q[0, 1]) / 2.0
+                    d2q_dx2 = patch_q[2, 1] - 2 * patch_q[1, 1] + patch_q[0, 1]
+                    off_x = -dq_dx / d2q_dx2 if abs(d2q_dx2) > 1e-5 else 0.0
+
+                    dq_dz = (patch_q[1, 2] - patch_q[1, 0]) / 2.0
+                    d2q_dz2 = patch_q[1, 2] - 2 * patch_q[1, 1] + patch_q[1, 0]
+                    off_z = -dq_dz / d2q_dz2 if abs(d2q_dz2) > 1e-5 else 0.0
+
+                    off_x = np.clip(off_x, -0.5, 0.5)
+                    off_z = np.clip(off_z, -0.5, 0.5)
+                    mesh_xc = float(XX[ix, iz] + off_x * dx)
+                    mesh_zc = float(ZZ[ix, iz] + off_z * dz)
+                else:
+                    mesh_xc = float(XX[ix, iz])
+                    mesh_zc = float(ZZ[ix, iz])
+
+                init_xc_m = mesh_xc
+                init_zc_m = mesh_zc
+                q_max = float(q_grid[ix, iz])
+
+                # Two-pass FWHM (Q = 0.5 * Q_max) spoke sampling to determine true boundary centroid:
+                # Pass 1: Sample spokes from Q-peak to get initial boundary points
+                num_spokes = 24
+                spoke_angles = np.linspace(0, 2 * np.pi, num_spokes, endpoint=False)
+                r_search = np.linspace(0, 1.5, 150)
+
+                bnd_m1 = []
+                for phi in spoke_angles:
+                    x_spoke = init_xc_m + r_search * np.cos(phi)
+                    z_spoke = init_zc_m + r_search * np.sin(phi)
+                    q_spoke = interp_q(np.column_stack((x_spoke, z_spoke)))
+                    target_q = 0.5 * q_max
+                    below = np.where(q_spoke < target_q)[0]
+                    if len(below) > 0:
+                        idx_b = below[0]
+                        r_half = r_search[idx_b] if idx_b == 0 else (
+                            r_search[idx_b-1] + (target_q - q_spoke[idx_b-1]) * (r_search[idx_b] - r_search[idx_b-1]) / (q_spoke[idx_b] - q_spoke[idx_b-1] + 1e-12)
+                        )
+                    else:
+                        r_half = r_search[-1]
+                    bnd_m1.append([init_xc_m + r_half * np.cos(phi), init_zc_m + r_half * np.sin(phi)])
+
+                cent_m1 = np.mean(bnd_m1, axis=0)
+
+                # Pass 2: Refine spokes radiating from Pass 1 boundary centroid
+                bnd_pts_rot = []
+                bnd_m2 = []
+                for phi in spoke_angles:
+                    x_spoke = cent_m1[0] + r_search * np.cos(phi)
+                    z_spoke = cent_m1[1] + r_search * np.sin(phi)
+                    q_spoke = interp_q(np.column_stack((x_spoke, z_spoke)))
+                    target_q = 0.5 * q_max
+                    below = np.where(q_spoke < target_q)[0]
+                    if len(below) > 0:
+                        idx_b = below[0]
+                        r_half = r_search[idx_b] if idx_b == 0 else (
+                            r_search[idx_b-1] + (target_q - q_spoke[idx_b-1]) * (r_search[idx_b] - r_search[idx_b-1]) / (q_spoke[idx_b] - q_spoke[idx_b-1] + 1e-12)
+                        )
+                    else:
+                        r_half = r_search[-1]
+                    xb_m = cent_m1[0] + r_half * np.cos(phi)
+                    zb_m = cent_m1[1] + r_half * np.sin(phi)
+                    bnd_m2.append([xb_m, zb_m])
+
+                    xb_r = float((-xb_m / rotor_diam) * np.cos(theta) - (zb_m / rotor_diam) * np.sin(theta))
+                    zb_r = float((-xb_m / rotor_diam) * np.sin(theta) + (zb_m / rotor_diam) * np.cos(theta))
+                    bnd_pts_rot.append((xb_r, zb_r))
+
+                bnd_pts_rot = np.array(bnd_pts_rot)
+                final_cent_m = np.mean(bnd_m2, axis=0)
+                mesh_xc = float(final_cent_m[0])
+                mesh_zc = float(final_cent_m[1])
+                xc_rot = float((-mesh_xc / rotor_diam) * np.cos(theta) - (mesh_zc / rotor_diam) * np.sin(theta))
+                zc_rot = float((-mesh_xc / rotor_diam) * np.sin(theta) + (mesh_zc / rotor_diam) * np.cos(theta))
+
+                # Fit ellipse to refined boundary points centered at boundary centroid (xc_rot, zc_rot)
+                dx_b = bnd_pts_rot[:, 0] - xc_rot
+                dz_b = bnd_pts_rot[:, 1] - zc_rot
+                cov = np.cov(dx_b, dz_b)
+                eigvals, eigvecs = np.linalg.eigh(cov)
+                order = eigvals.argsort()[::-1]
+                a_rot = float(np.sqrt(2 * max(eigvals[order[0]], 1e-6)))
+                b_rot = float(np.sqrt(2 * max(eigvals[order[1]], 1e-6)))
+                ang_rot = float(np.degrees(np.arctan2(eigvecs[1, order[0]], eigvecs[0, order[0]])))
+
+                step_ellipses.append({
+                    'time': current_time,
+                    'center': (xc_rot, zc_rot),
+                    'mesh_center': (mesh_xc, mesh_zc),
+                    'semi_major': a_rot,
+                    'semi_minor': b_rot,
+                    'angle_deg': ang_rot,
+                    'q_max': q_max,
+                    'bnd_pts': bnd_pts_rot
+                })
 
             # Sort detected vortices by downstream position (X_rot)
             step_ellipses.sort(key=lambda e: e['center'][0])
@@ -257,17 +332,23 @@ def process_unsteady_and_vortices(
 
     # 4. Vortex Tracking Across Timesteps
     print("\nTracking vortex trajectories across timesteps...")
-    tracks = []
+    dt_nominal = float(np.median(np.diff(timesteps))) if len(timesteps) > 1 else 1.0
+    if dt_nominal <= 0:
+        dt_nominal = 1.0
+
+    raw_tracks = []
     for t_idx, detections in enumerate(vortex_detections_per_step):
         t = timesteps[t_idx]
         if t_idx == 0:
             for det in detections:
-                tracks.append([det])
+                raw_tracks.append([det])
         else:
             unmatched = list(detections)
-            for tr in tracks:
+            for tr in raw_tracks:
                 last_det = tr[-1]
-                if last_det['time'] != timesteps[t_idx - 1]:
+                dt_frames = (t - last_det['time']) / dt_nominal
+                dt_frames = max(dt_frames, 1.0)
+                if dt_frames > 3.0:
                     continue
                 last_x, last_z = last_det['center']
                 best_idx = None
@@ -277,8 +358,8 @@ def process_unsteady_and_vortices(
                     dx_cand = cand_x - last_x
                     dz_cand = cand_z - last_z
                     dist = np.sqrt(dx_cand**2 + dz_cand**2)
-                    # Convection constraint: moving downstream (-0.005 <= dx <= 0.025, |dz| <= 0.025)
-                    if -0.005 <= dx_cand <= 0.025 and abs(dz_cand) <= 0.025:
+                    # Relaxed convection bounds: downstream movement
+                    if -0.01 <= dx_cand <= 0.08 * dt_frames and abs(dz_cand) <= 0.06 * dt_frames:
                         if dist < best_dist:
                             best_dist = dist
                             best_idx = cand_idx
@@ -286,10 +367,27 @@ def process_unsteady_and_vortices(
                     matched = unmatched.pop(best_idx)
                     tr.append(matched)
             for rem in unmatched:
-                tracks.append([rem])
+                raw_tracks.append([rem])
 
-    # Filter short tracks (noise) with < 4 timesteps
-    tracks = [tr for tr in tracks if len(tr) >= 4]
+    # Final pass: polynomial outlier rejection and minimum length check
+    tracks = []
+    for tr in raw_tracks:
+        if len(tr) < 2:
+            continue
+        if len(tr) >= 4:
+            x_arr = np.array([d['center'][0] for d in tr])
+            z_arr = np.array([d['center'][1] for d in tr])
+            poly = np.polyfit(x_arr, z_arr, 2)
+            z_fit = np.polyval(poly, x_arr)
+            residuals = np.abs(z_arr - z_fit)
+            std_res = np.std(residuals)
+            valid = residuals <= max(3 * std_res, 0.02)
+            clean_tr = [tr[i] for i in range(len(tr)) if valid[i]]
+        else:
+            clean_tr = tr
+        if len(clean_tr) >= 2:
+            tracks.append(clean_tr)
+
     tracks.sort(key=lambda tr: tr[0]['center'][0])
     print(f"Formed {len(tracks)} continuous vortex tracks:")
     for idx, tr in enumerate(tracks):
@@ -371,8 +469,9 @@ def process_unsteady_and_vortices(
             gtr.create_dataset('semi_major', data=np.array([d['semi_major'] for d in tr]))
             gtr.create_dataset('semi_minor', data=np.array([d['semi_minor'] for d in tr]))
             gtr.create_dataset('angle_deg', data=np.array([d['angle_deg'] for d in tr]))
-            if 'boundary_pts' in tr[0]:
-                gtr.create_dataset('step0_swirl_peaks', data=np.array(tr[0]['boundary_pts']))
+            gtr.create_dataset('q_max', data=np.array([d['q_max'] for d in tr]))
+            if 'bnd_pts' in tr[0]:
+                gtr.create_dataset('bnd_pts_step0', data=tr[0]['bnd_pts'])
 
     print(f"Processing complete in {time.time() - t_start:.2f}s! Output saved to {output_h5}")
 

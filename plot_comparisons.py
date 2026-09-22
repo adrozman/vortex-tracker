@@ -39,18 +39,24 @@ def plot_all_standalone_figures(h5_path, output_dir="plots"):
             grp_vort = hf['vortices']
             for tr_name in sorted(grp_vort.keys()):
                 gtr = grp_vort[tr_name]
-                tr_dict = {
+                tracks.append({
                     'name': tr_name,
                     'time': gtr['time'][:],
                     'X_over_D': gtr['X_over_D'][:],
                     'Z_over_D': gtr['Z_over_D'][:],
+                    'mesh_x': gtr['mesh_x'][:] if 'mesh_x' in gtr else None,
+                    'mesh_z': gtr['mesh_z'][:] if 'mesh_z' in gtr else None,
                     'semi_major': gtr['semi_major'][:],
                     'semi_minor': gtr['semi_minor'][:],
-                    'angle_deg': gtr['angle_deg'][:]
-                }
-                if 'step0_swirl_peaks' in gtr:
-                    tr_dict['step0_swirl_peaks'] = gtr['step0_swirl_peaks'][:]
-                tracks.append(tr_dict)
+                    'angle_deg': gtr['angle_deg'][:],
+                    'bnd_pts_step0': gtr['bnd_pts_step0'][:] if 'bnd_pts_step0' in gtr else None
+                })
+
+        x_mesh = hf['grid/x_mesh'][:] if 'grid/x_mesh' in hf else None
+        z_mesh = hf['grid/z_mesh'][:] if 'grid/z_mesh' in hf else None
+        U_snap0 = (hf['mean/U_mean'][:] + hf['unsteady/u_prime'][0]) if 'unsteady/u_prime' in hf else None
+        W_snap0 = (hf['mean/W_mean'][:] + hf['unsteady/w_prime'][0]) if 'unsteady/w_prime' in hf else None
+        u_inf = hf.attrs.get('U_inf_nondim', 10.0 / 340.0)
 
     # Common styling parameters matching experimental figures
     piv_xlim = (-0.3, 0.08)
@@ -164,11 +170,11 @@ def plot_all_standalone_figures(h5_path, output_dir="plots"):
     
     # Annotations along tip path (matching experimental figure)
     ax.plot([-0.20, -0.10, 0.0], [-0.33*(-0.20)-0.005, -0.33*(-0.10)-0.005, -0.005], 'r*', markersize=8)
-    ax.annotate("120\u00b0\n0.81R", xy=(-0.20, -0.33*(-0.20)-0.005), xytext=(-0.22, -0.01),
+    ax.annotate(r"$120^\circ$" + "\n0.81R", xy=(-0.20, -0.33*(-0.20)-0.005), xytext=(-0.22, -0.01),
                 arrowprops=dict(arrowstyle="->", color="black", lw=1), fontsize=11, ha='center')
-    ax.annotate("105\u00b0\n0.72R", xy=(-0.10, -0.33*(-0.10)-0.005), xytext=(-0.11, -0.05),
+    ax.annotate(r"$105^\circ$" + "\n0.72R", xy=(-0.10, -0.33*(-0.10)-0.005), xytext=(-0.11, -0.05),
                 arrowprops=dict(arrowstyle="->", color="black", lw=1), fontsize=11, ha='center')
-    ax.annotate("90\u00b0\n0.70R", xy=(0.0, -0.005), xytext=(0.0, -0.08),
+    ax.annotate(r"$90^\circ$" + "\n0.70R", xy=(0.0, -0.005), xytext=(0.0, -0.08),
                 arrowprops=dict(arrowstyle="->", color="black", lw=1), fontsize=11, ha='center')
 
     ax.set_xlim(-0.35, 0.08)
@@ -193,10 +199,9 @@ def plot_all_standalone_figures(h5_path, output_dir="plots"):
         fig, ax = plt.subplots(figsize=(9, 7.5))
         im = ax.pcolormesh(X_rot, Z_rot, Q_snap0, cmap='RdBu_r', vmin=-5e6, vmax=5e6, shading='auto')
         
-        # Plot detected ellipses, centers, and swirl peaks for timestep 0
+        # Plot detected ellipses and centers for timestep 0
         vort_idx = 1
         for tr in tracks:
-            # Check if track has point at t=timesteps[0]
             if len(tr['time']) > 0 and tr['time'][0] == timesteps[0]:
                 xc = tr['X_over_D'][0]
                 zc = tr['Z_over_D'][0]
@@ -204,23 +209,22 @@ def plot_all_standalone_figures(h5_path, output_dir="plots"):
                 minor = tr['semi_minor'][0]
                 angle = tr['angle_deg'][0]
                 
-                # Plot swirl velocity peak boundary points if available
-                if 'step0_swirl_peaks' in tr:
-                    pts = tr['step0_swirl_peaks']
-                    ax.plot(pts[:, 0], pts[:, 1], 'm.', markersize=5,
-                            label='Swirl Velocity Peaks' if vort_idx == 1 else "")
-
                 # Plot center point
                 ax.plot(xc, zc, 'yo', markersize=8, markeredgecolor='black',
                         label='Calculated Core Center' if vort_idx==1 else "")
                 
-                # Plot fitted ellipse passing through swirl peaks
+                # Plot FWHM boundary points if available
+                if tr['bnd_pts_step0'] is not None:
+                    ax.plot(tr['bnd_pts_step0'][:, 0], tr['bnd_pts_step0'][:, 1], 'm.', markersize=5,
+                            label='FWHM Boundary Points' if vort_idx==1 else "")
+
+                # Plot 2-sigma fitted ellipse
                 ell = Ellipse((xc, zc), width=2*major, height=2*minor, angle=angle,
-                              edgecolor='yellow', facecolor='none', linewidth=2.2, linestyle='--',
-                              label='Fitted Core Ellipse' if vort_idx==1 else "")
+                              edgecolor='yellow', facecolor='none', linewidth=2.0, linestyle='--',
+                              label='Fitted FWHM Ellipse' if vort_idx==1 else "")
                 ax.add_patch(ell)
                 
-                ax.text(xc, zc + 0.025, f"Vortex {vort_idx}\n({xc:.3f}, {zc:.3f})",
+                ax.text(xc, zc + 0.02, f"Vortex {vort_idx}\n({xc:.3f}, {zc:.3f})",
                         color='yellow', fontsize=11, fontweight='bold', ha='center')
                 vort_idx += 1
 
@@ -228,7 +232,7 @@ def plot_all_standalone_figures(h5_path, output_dir="plots"):
         ax.set_ylim(-0.12, 0.4)
         ax.set_xlabel(r"$X/D$", fontsize=16)
         ax.set_ylabel(r"$Z/D$", fontsize=16)
-        ax.set_title(f"Visual Verification: Vortex Cores & Fitted Ellipses (Step {timesteps[0]:.0f})", fontsize=16, pad=12)
+        ax.set_title(f"Visual Verification: Vortex Peak Centers & FWHM Ellipses (Step {timesteps[0]:.0f})", fontsize=16, pad=12)
         ax.tick_params(labelsize=14)
         ax.legend(loc='upper left', fontsize=12)
         cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
@@ -279,6 +283,80 @@ def plot_all_standalone_figures(h5_path, output_dir="plots"):
     plt.savefig(out8, dpi=200)
     plt.close()
     print(f"  Saved {out8}")
+
+    # ----------------------------------------------------
+    # 8. 1D Radial Slices Verification Profiles (Q & Swirl Velocity)
+    # ----------------------------------------------------
+    if Q_snap0 is not None and x_mesh is not None and z_mesh is not None:
+        from scipy.interpolate import RegularGridInterpolator
+        print("Generating 1D radial slice verification profiles...")
+        x_lin = x_mesh[:, 0]
+        z_lin = z_mesh[0, :]
+        interp_q = RegularGridInterpolator((x_lin, z_lin), Q_snap0, bounds_error=False, fill_value=0.0)
+        interp_u = RegularGridInterpolator((x_lin, z_lin), U_snap0, bounds_error=False, fill_value=0.0) if U_snap0 is not None else None
+        interp_w = RegularGridInterpolator((x_lin, z_lin), W_snap0, bounds_error=False, fill_value=0.0) if W_snap0 is not None else None
+
+        valid_tracks_step0 = [tr for tr in tracks if len(tr['time']) > 0 and tr['time'][0] == timesteps[0] and tr['mesh_x'] is not None]
+        n_vort = len(valid_tracks_step0)
+
+        if n_vort > 0:
+            fig, axes = plt.subplots(n_vort, 2, figsize=(12, 3.2 * n_vort))
+            if n_vort == 1:
+                axes = np.expand_dims(axes, axis=0)
+
+            r_sample = np.linspace(-1.5, 1.5, 100) # inches
+            r_D = r_sample / 24.0 # rotor diameter 24 in
+
+            for idx, tr in enumerate(valid_tracks_step0):
+                xc_m = tr['mesh_x'][0]
+                zc_m = tr['mesh_z'][0]
+                xc_r = tr['X_over_D'][0]
+                zc_r = tr['Z_over_D'][0]
+
+                pts_h = np.column_stack((xc_m + r_sample, np.full_like(r_sample, zc_m)))
+                pts_v = np.column_stack((np.full_like(r_sample, xc_m), zc_m + r_sample))
+
+                q_h = interp_q(pts_h)
+                q_v = interp_q(pts_v)
+
+                # Q Profile
+                ax1 = axes[idx, 0]
+                ax1.plot(r_D, q_h / 1e6, 'b-', label='Horizontal Slice (X)', linewidth=2)
+                ax1.plot(r_D, q_v / 1e6, 'r--', label='Vertical Slice (Z)', linewidth=2)
+                ax1.axvline(0, color='gray', linestyle=':', alpha=0.7)
+                ax1.set_title(f"Vortex {idx+1} at X/D={xc_r:.3f}, Z/D={zc_r:.3f} — Q Profile", fontsize=12)
+                ax1.set_xlabel("Radial Distance r/D", fontsize=11)
+                ax1.set_ylabel(r"$Q\ (\times 10^6\ \mathrm{s}^{-2})$", fontsize=11)
+                ax1.grid(True, alpha=0.3)
+                ax1.legend(loc='upper right', fontsize=10)
+
+                # Swirl Velocity Profile
+                ax2 = axes[idx, 1]
+                if interp_w is not None and interp_u is not None:
+                    w_h = interp_w(pts_h)
+                    w_c = interp_w(np.array([[xc_m, zc_m]]))[0]
+                    v_swirl_h = w_h - w_c
+
+                    u_v = interp_u(pts_v)
+                    u_c = interp_u(np.array([[xc_m, zc_m]]))[0]
+                    v_swirl_v = -(u_v - u_c)
+
+                    ax2.plot(r_D, v_swirl_h / u_inf, 'b-', label=r'$V_\theta$ (Horiz)', linewidth=2)
+                    ax2.plot(r_D, v_swirl_v / u_inf, 'r--', label=r'$V_\theta$ (Vert)', linewidth=2)
+                    ax2.axvline(0, color='gray', linestyle=':', alpha=0.7)
+                    ax2.axhline(0, color='gray', linestyle=':', alpha=0.7)
+
+                    ax2.set_title(f"Vortex {idx+1} — Swirl Velocity Profile", fontsize=12)
+                    ax2.set_xlabel("Radial Distance r/D", fontsize=11)
+                    ax2.set_ylabel(r"$V_\theta / U_\infty$", fontsize=11)
+                    ax2.grid(True, alpha=0.3)
+                    ax2.legend(loc='upper right', fontsize=10)
+
+            plt.tight_layout()
+            out9 = os.path.join(output_dir, "vortex_1d_slices_verification.png")
+            plt.savefig(out9, dpi=200)
+            plt.close()
+            print(f"  Saved {out9}")
 
     print("\nAll standalone figures generated successfully!")
 
