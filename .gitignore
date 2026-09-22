@@ -1,11 +1,6 @@
-# Data directories and transfer references
-fvuns_reader_transfer/
-experimental_figures_to_compare_to/
-
-# Large binary / data outputs
+fvuns_reader_transfer/*
+!fvuns_reader_transfer/*.py
+!fvuns_reader_transfer/*.pbs
+experimental_figures_to_compare_to
 *.h5
-
-# Python cache & temporary files
-__pycache__/
-*.pyc
-.DS_Store
+*.npy
