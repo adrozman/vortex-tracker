@@ -71,6 +71,7 @@ Trajectories of each individual tip vortex as it convects downstream above the r
 ├── fvuns_reader_transfer/
 │   ├── process_unsteady_and_vortices.py   # Main extraction, decomposition & tracking pipeline
 │   ├── plot_comparisons.py                # Standalone figure generation script
+│   ├── debug_vortex_tracks.py             # Diagnostic tool for inspecting tracks & Q-criterion snapshots
 │   ├── ellipse_fit.py                     # Moment-based ellipse fitting module
 │   ├── fvuns_reader.py                    # Binary parser for .fvuns CFD planar slice files
 │   ├── read_h5_example.py                 # Example script to inspect & read HDF5 data
@@ -104,7 +105,29 @@ python plot_comparisons.py \
     --outdir "plots"
 ```
 
-### 3. Cluster Batch Execution (PBS on NAS)
+To exclude specific secondary/wake outlier tracks or require a minimum track length:
+```bash
+# Exclude specific track(s) by label or number:
+python plot_comparisons.py --h5 velocity_and_vortex_data.h5 --exclude "Vortex 4"
+
+# Or filter by minimum track length:
+python plot_comparisons.py --h5 velocity_and_vortex_data.h5 --min_points 5
+```
+
+### 3. Inspect & Debug Trajectories (Secondary / Offset Vortices)
+Use `debug_vortex_tracks.py` to inspect any track without modifying pipeline scripts:
+```bash
+# Summary table of all tracks with Q_max, timestamps, and outlier flags
+python debug_vortex_tracks.py --h5 velocity_and_vortex_data.h5
+
+# Inspect a specific track and generate zoomed Q-criterion snapshot panels
+python debug_vortex_tracks.py --h5 velocity_and_vortex_data.h5 --track 4
+
+# Inspect full field at a specific timestep
+python debug_vortex_tracks.py --h5 velocity_and_vortex_data.h5 --step 22117
+```
+
+### 4. Cluster Batch Execution (PBS on NAS)
 For large cases with hundreds of timesteps:
 ```bash
 qsub process.pbs

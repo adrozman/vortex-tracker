@@ -7,7 +7,9 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 
-def plot_all_standalone_figures(h5_path, output_dir="plots"):
+import re
+
+def plot_all_standalone_figures(h5_path, output_dir="plots", exclude_tracks=None, min_points=2):
     os.makedirs(output_dir, exist_ok=True)
     print(f"Loading HDF5 data from: {h5_path}")
     
@@ -156,11 +158,32 @@ def plot_all_standalone_figures(h5_path, output_dir="plots"):
     if Q_mean is not None:
         ax.pcolormesh(X_rot, Z_rot, Q_mean, cmap='RdBu_r', vmin=-5e6, vmax=5e6, shading='auto', alpha=0.35)
 
+    # Filter tracks if user requested exclusions or min_points
+    exclude_set = set()
+    if exclude_tracks:
+        for ex in exclude_tracks:
+            ex_str = str(ex).strip()
+            exclude_set.add(ex_str.lower())
+            m = re.search(r'\d+', ex_str)
+            if m:
+                num = int(m.group())
+                exclude_set.add(f"track_{num:02d}".lower())
+                exclude_set.add(f"track_{num}".lower())
+                exclude_set.add(f"vortex {num}".lower())
+                exclude_set.add(str(num))
+
     # Plot individual vortex trajectories
     colors = ['#0000CC', '#0066FF', '#0099FF', '#33CC33', '#FF6600', '#CC0000', '#9900CC']
     for idx, tr in enumerate(tracks):
+        v_lbl = f"Vortex {idx+1}"
+        if tr['name'].lower() in exclude_set or v_lbl.lower() in exclude_set or str(idx+1) in exclude_set:
+            print(f"  Excluding {v_lbl} ({tr['name']}) from trajectory plot.")
+            continue
+        if len(tr['time']) < min_points:
+            print(f"  Filtering {v_lbl} ({tr['name']}): length {len(tr['time'])} < {min_points} points.")
+            continue
         c = colors[idx % len(colors)]
-        label_text = f"Vortex {idx+1}"
+        label_text = v_lbl
         ax.plot(tr['X_over_D'], tr['Z_over_D'], 'o-', color=c, linewidth=2.5, markersize=5.5, label=label_text)
 
     # Rotor tip path reference line
@@ -364,7 +387,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate standalone publication-quality figures from HDF5 output.")
     parser.add_argument("--h5", type=str, default="velocity_and_vortex_data.h5", help="Path to velocity_and_vortex_data.h5")
     parser.add_argument("--outdir", type=str, default="plots", help="Directory to save generated PNG images")
+    parser.add_argument("--exclude", nargs="*", default=None, help="List of tracks to exclude from trajectory plot (e.g. --exclude 3 or --exclude track_03 'Vortex 4')")
+    parser.add_argument("--min_points", type=int, default=2, help="Minimum number of points required to plot a trajectory (default 2)")
     args = parser.parse_args()
     
-    plot_all_standalone_figures(args.h5, args.outdir)
+    plot_all_standalone_figures(args.h5, args.outdir, exclude_tracks=args.exclude, min_points=args.min_points)
 
