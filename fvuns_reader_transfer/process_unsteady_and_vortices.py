@@ -214,40 +214,66 @@ def process_unsteady_and_vortices(
                     mesh_xc = float(XX[ix, iz])
                     mesh_zc = float(ZZ[ix, iz])
 
-                xc_rot = float((-mesh_xc / rotor_diam) * np.cos(theta) - (mesh_zc / rotor_diam) * np.sin(theta))
-                zc_rot = float((-mesh_xc / rotor_diam) * np.sin(theta) + (mesh_zc / rotor_diam) * np.cos(theta))
+                init_xc_m = mesh_xc
+                init_zc_m = mesh_zc
                 q_max = float(q_grid[ix, iz])
 
-                # Extract FWHM (Q = 0.5 * Q_max) contour boundary points along 16 radial spokes
-                bnd_pts_rot = []
-                for phi in spoke_angles:
-                    x_spoke = mesh_xc + r_search * np.cos(phi)
-                    z_spoke = mesh_zc + r_search * np.sin(phi)
-                    pts_spoke = np.column_stack((x_spoke, z_spoke))
-                    q_spoke = interp_q(pts_spoke)
+                # Two-pass FWHM (Q = 0.5 * Q_max) spoke sampling to determine true boundary centroid:
+                # Pass 1: Sample spokes from Q-peak to get initial boundary points
+                num_spokes = 24
+                spoke_angles = np.linspace(0, 2 * np.pi, num_spokes, endpoint=False)
+                r_search = np.linspace(0, 1.5, 150)
 
+                bnd_m1 = []
+                for phi in spoke_angles:
+                    x_spoke = init_xc_m + r_search * np.cos(phi)
+                    z_spoke = init_zc_m + r_search * np.sin(phi)
+                    q_spoke = interp_q(np.column_stack((x_spoke, z_spoke)))
                     target_q = 0.5 * q_max
                     below = np.where(q_spoke < target_q)[0]
                     if len(below) > 0:
                         idx_b = below[0]
-                        if idx_b > 0:
-                            q1, q2 = q_spoke[idx_b-1], q_spoke[idx_b]
-                            r1, r2 = r_search[idx_b-1], r_search[idx_b]
-                            r_half = r1 + (target_q - q1) * (r2 - r1) / (q2 - q1 + 1e-12)
-                        else:
-                            r_half = r_search[0]
+                        r_half = r_search[idx_b] if idx_b == 0 else (
+                            r_search[idx_b-1] + (target_q - q_spoke[idx_b-1]) * (r_search[idx_b] - r_search[idx_b-1]) / (q_spoke[idx_b] - q_spoke[idx_b-1] + 1e-12)
+                        )
                     else:
                         r_half = r_search[-1]
+                    bnd_m1.append([init_xc_m + r_half * np.cos(phi), init_zc_m + r_half * np.sin(phi)])
 
-                    x_bnd_m = mesh_xc + r_half * np.cos(phi)
-                    z_bnd_m = mesh_zc + r_half * np.sin(phi)
-                    x_bnd_r = float((-x_bnd_m / rotor_diam) * np.cos(theta) - (z_bnd_m / rotor_diam) * np.sin(theta))
-                    z_bnd_r = float((-x_bnd_m / rotor_diam) * np.sin(theta) + (z_bnd_m / rotor_diam) * np.cos(theta))
-                    bnd_pts_rot.append((x_bnd_r, z_bnd_r))
+                cent_m1 = np.mean(bnd_m1, axis=0)
+
+                # Pass 2: Refine spokes radiating from Pass 1 boundary centroid
+                bnd_pts_rot = []
+                bnd_m2 = []
+                for phi in spoke_angles:
+                    x_spoke = cent_m1[0] + r_search * np.cos(phi)
+                    z_spoke = cent_m1[1] + r_search * np.sin(phi)
+                    q_spoke = interp_q(np.column_stack((x_spoke, z_spoke)))
+                    target_q = 0.5 * q_max
+                    below = np.where(q_spoke < target_q)[0]
+                    if len(below) > 0:
+                        idx_b = below[0]
+                        r_half = r_search[idx_b] if idx_b == 0 else (
+                            r_search[idx_b-1] + (target_q - q_spoke[idx_b-1]) * (r_search[idx_b] - r_search[idx_b-1]) / (q_spoke[idx_b] - q_spoke[idx_b-1] + 1e-12)
+                        )
+                    else:
+                        r_half = r_search[-1]
+                    xb_m = cent_m1[0] + r_half * np.cos(phi)
+                    zb_m = cent_m1[1] + r_half * np.sin(phi)
+                    bnd_m2.append([xb_m, zb_m])
+
+                    xb_r = float((-xb_m / rotor_diam) * np.cos(theta) - (zb_m / rotor_diam) * np.sin(theta))
+                    zb_r = float((-xb_m / rotor_diam) * np.sin(theta) + (zb_m / rotor_diam) * np.cos(theta))
+                    bnd_pts_rot.append((xb_r, zb_r))
 
                 bnd_pts_rot = np.array(bnd_pts_rot)
+                final_cent_m = np.mean(bnd_m2, axis=0)
+                mesh_xc = float(final_cent_m[0])
+                mesh_zc = float(final_cent_m[1])
+                xc_rot = float((-mesh_xc / rotor_diam) * np.cos(theta) - (mesh_zc / rotor_diam) * np.sin(theta))
+                zc_rot = float((-mesh_xc / rotor_diam) * np.sin(theta) + (mesh_zc / rotor_diam) * np.cos(theta))
 
-                # Fit ellipse to boundary points relative to peak center
+                # Fit ellipse to refined boundary points centered at boundary centroid (xc_rot, zc_rot)
                 dx_b = bnd_pts_rot[:, 0] - xc_rot
                 dz_b = bnd_pts_rot[:, 1] - zc_rot
                 cov = np.cov(dx_b, dz_b)
