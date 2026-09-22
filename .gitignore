@@ -1,0 +1,11 @@
+# Data directories and transfer references
+fvuns_reader_transfer/
+experimental_figures_to_compare_to/
+
+# Large binary / data outputs
+*.h5
+
+# Python cache & temporary files
+__pycache__/
+*.pyc
+.DS_Store
