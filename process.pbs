@@ -1,7 +1,7 @@
 #PBS -S /bin/bash
 #PBS -N process_piv
 #PBS -q normal
-#PBS -l select=1:ncpus=128:mpiprocs=128:model=mil_ait,walltime=02:00:00
+#PBS -l select=1:ncpus=28:mpiprocs=28:model=bro_ele,walltime=8:00:00
 #PBS -j oe
 #PBS -M arozman@bu.edu
 #PBS -m abe
@@ -12,7 +12,7 @@ cd $PBS_O_WORKDIR
 
 echo "Starting unsteady velocity and vortex extraction pipeline..."
 python -u process_unsteady_and_vortices.py \
-    --input "coviz/pivplane_*.fvuns" \
+    --input "../coviz/pivplane_*.fvuns" \
     --output_h5 "velocity_and_vortex_data.h5" \
     --dx 0.078125 \
     --dz 0.078125 \

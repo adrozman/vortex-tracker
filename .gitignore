@@ -1,8 +1,8 @@
 fvuns_reader_transfer/*
-!fvuns_reader_transfer/*.py
-!fvuns_reader_transfer/*.pbs
 experimental_figures_to_compare_to
 *.h5
 *.npy
 __pycache__/
 */__pycache__/
+plots/
+!plots/*_prime_step_*.png
