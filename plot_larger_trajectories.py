@@ -283,3 +283,4 @@ def generate_trajectory_plots(h5_path, output_dir="plots"):
 
 if __name__ == "__main__":
     generate_trajectory_plots("velocity_and_vortex_data_larger.h5", output_dir="plots")
+

@@ -8,8 +8,22 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 
 import re
+import time
 
-def plot_all_standalone_figures(h5_path, output_dir="plots", exclude_tracks=None, min_points=2):
+def safe_savefig(target, filepath, dpi=200, **kwargs):
+    os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
+    for attempt in range(5):
+        try:
+            target.savefig(filepath, dpi=dpi, **kwargs)
+            return
+        except OSError as e:
+            if attempt < 4:
+                time.sleep(0.15 * (2 ** attempt))
+            else:
+                raise e
+
+def plot_all_standalone_figures(h5_path, output_dir="plots", exclude_tracks=None, min_points=2,
+                                xlim=(-0.75, 0.75), ylim=(-0.75, 0.75), phase_step=22207, period=288):
     os.makedirs(output_dir, exist_ok=True)
     print(f"Loading HDF5 data from: {h5_path}")
     
@@ -60,9 +74,15 @@ def plot_all_standalone_figures(h5_path, output_dir="plots", exclude_tracks=None
         W_snap0 = (hf['mean/W_mean'][:] + hf['unsteady/w_prime'][0]) if 'unsteady/w_prime' in hf else None
         u_inf = hf.attrs.get('U_inf_nondim', 10.0 / 340.0)
 
-    # Common styling parameters matching experimental figures
-    piv_xlim = (-0.3, 0.08)
-    piv_ylim = (-0.1, 0.4)
+    # Spatial domain limits (defaults to full extracted data bounds [-0.75, 0.75])
+    if xlim is None:
+        xlim = (-0.75, 0.75)
+    else:
+        xlim = tuple(xlim)
+    if ylim is None:
+        ylim = (-0.75, 0.75)
+    else:
+        ylim = tuple(ylim)
 
     # ----------------------------------------------------
     # 1. Mean U Velocity: <\bar{U}> / U_\infty
@@ -70,8 +90,8 @@ def plot_all_standalone_figures(h5_path, output_dir="plots", exclude_tracks=None
     print("Generating mean_U_over_Uinf.png...")
     fig, ax = plt.subplots(figsize=(8, 7))
     im = ax.pcolormesh(X_rot, Z_rot, U_mean_norm, cmap='Spectral_r', vmin=-1.0, vmax=3.0, shading='auto')
-    ax.set_xlim(piv_xlim)
-    ax.set_ylim(piv_ylim)
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
     ax.set_xlabel(r"$X/D$", fontsize=16)
     ax.set_ylabel(r"$Z/D$", fontsize=16)
     ax.set_title(r"$\langle\bar{U}\rangle / U_\infty$", fontsize=18, pad=12)
@@ -81,7 +101,7 @@ def plot_all_standalone_figures(h5_path, output_dir="plots", exclude_tracks=None
     cbar.set_label(r"$\langle\bar{U}\rangle / U_\infty$", fontsize=16)
     plt.tight_layout()
     out1 = os.path.join(output_dir, "mean_U_over_Uinf.png")
-    plt.savefig(out1, dpi=200)
+    safe_savefig(plt, out1, dpi=200)
     plt.close()
     print(f"  Saved {out1}")
 
@@ -91,8 +111,8 @@ def plot_all_standalone_figures(h5_path, output_dir="plots", exclude_tracks=None
     print("Generating mean_W_over_Uinf.png...")
     fig, ax = plt.subplots(figsize=(8, 7))
     im = ax.pcolormesh(X_rot, Z_rot, W_mean_norm, cmap='Spectral_r', vmin=-3.0, vmax=3.0, shading='auto')
-    ax.set_xlim(piv_xlim)
-    ax.set_ylim(piv_ylim)
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
     ax.set_xlabel(r"$X/D$", fontsize=16)
     ax.set_ylabel(r"$Z/D$", fontsize=16)
     ax.set_title(r"$\langle\bar{W}\rangle / U_\infty$", fontsize=18, pad=12)
@@ -102,7 +122,7 @@ def plot_all_standalone_figures(h5_path, output_dir="plots", exclude_tracks=None
     cbar.set_label(r"$\langle\bar{W}\rangle / U_\infty$", fontsize=16)
     plt.tight_layout()
     out2 = os.path.join(output_dir, "mean_W_over_Uinf.png")
-    plt.savefig(out2, dpi=200)
+    safe_savefig(plt, out2, dpi=200)
     plt.close()
     print(f"  Saved {out2}")
 
@@ -112,8 +132,8 @@ def plot_all_standalone_figures(h5_path, output_dir="plots", exclude_tracks=None
     print("Generating variance_u_prime.png...")
     fig, ax = plt.subplots(figsize=(8, 7))
     im = ax.pcolormesh(X_rot, Z_rot, u_var_norm, cmap='Spectral_r', vmin=0.0, vmax=0.6, shading='auto')
-    ax.set_xlim(piv_xlim)
-    ax.set_ylim(piv_ylim)
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
     ax.set_xlabel(r"$X/D$", fontsize=16)
     ax.set_ylabel(r"$Z/D$", fontsize=16)
     ax.set_title(r"$\langle \bar{u}'^2 \rangle / U_\infty^2$", fontsize=18, pad=12)
@@ -123,7 +143,7 @@ def plot_all_standalone_figures(h5_path, output_dir="plots", exclude_tracks=None
     cbar.set_label(r"$\langle \bar{u}'^2 \rangle / U_\infty^2$", fontsize=16)
     plt.tight_layout()
     out3 = os.path.join(output_dir, "variance_u_prime.png")
-    plt.savefig(out3, dpi=200)
+    safe_savefig(plt, out3, dpi=200)
     plt.close()
     print(f"  Saved {out3}")
 
@@ -133,8 +153,8 @@ def plot_all_standalone_figures(h5_path, output_dir="plots", exclude_tracks=None
     print("Generating variance_w_prime.png...")
     fig, ax = plt.subplots(figsize=(8, 7))
     im = ax.pcolormesh(X_rot, Z_rot, w_var_norm, cmap='Spectral_r', vmin=0.0, vmax=0.6, shading='auto')
-    ax.set_xlim(piv_xlim)
-    ax.set_ylim(piv_ylim)
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
     ax.set_xlabel(r"$X/D$", fontsize=16)
     ax.set_ylabel(r"$Z/D$", fontsize=16)
     ax.set_title(r"$\langle \bar{w}'^2 \rangle / U_\infty^2$", fontsize=18, pad=12)
@@ -144,7 +164,7 @@ def plot_all_standalone_figures(h5_path, output_dir="plots", exclude_tracks=None
     cbar.set_label(r"$\langle \bar{w}'^2 \rangle / U_\infty^2$", fontsize=16)
     plt.tight_layout()
     out4 = os.path.join(output_dir, "variance_w_prime.png")
-    plt.savefig(out4, dpi=200)
+    safe_savefig(plt, out4, dpi=200)
     plt.close()
     print(f"  Saved {out4}")
 
@@ -186,8 +206,8 @@ def plot_all_standalone_figures(h5_path, output_dir="plots", exclude_tracks=None
         label_text = v_lbl
         ax.plot(tr['X_over_D'], tr['Z_over_D'], 'o-', color=c, linewidth=2.5, markersize=5.5, label=label_text)
 
-    # Rotor tip path reference line
-    tip_x = np.linspace(-0.35, 0.08, 100)
+    # Rotor tip path reference line spanning across the domain
+    tip_x = np.linspace(xlim[0], xlim[1], 300)
     tip_z = -0.33 * tip_x - 0.005
     ax.plot(tip_x, tip_z, 'k-', linewidth=2.2, label='Rotor tip path')
     
@@ -200,8 +220,8 @@ def plot_all_standalone_figures(h5_path, output_dir="plots", exclude_tracks=None
     ax.annotate(r"$90^\circ$" + "\n0.70R", xy=(0.0, -0.005), xytext=(0.0, -0.08),
                 arrowprops=dict(arrowstyle="->", color="black", lw=1), fontsize=11, ha='center')
 
-    ax.set_xlim(-0.35, 0.08)
-    ax.set_ylim(-0.12, 0.4)
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
     ax.set_xlabel(r"$X/D$", fontsize=16)
     ax.set_ylabel(r"$Z/D$", fontsize=16)
     ax.set_title("Extracted Tip Vortex Trajectories", fontsize=18, pad=12)
@@ -210,7 +230,7 @@ def plot_all_standalone_figures(h5_path, output_dir="plots", exclude_tracks=None
     ax.grid(True, linestyle=':', alpha=0.6)
     plt.tight_layout()
     out5 = os.path.join(output_dir, "vortex_trajectories.png")
-    plt.savefig(out5, dpi=200)
+    safe_savefig(plt, out5, dpi=200)
     plt.close()
     print(f"  Saved {out5}")
 
@@ -251,8 +271,8 @@ def plot_all_standalone_figures(h5_path, output_dir="plots", exclude_tracks=None
                         color='yellow', fontsize=11, fontweight='bold', ha='center')
                 vort_idx += 1
 
-        ax.set_xlim(-0.35, 0.08)
-        ax.set_ylim(-0.12, 0.4)
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
         ax.set_xlabel(r"$X/D$", fontsize=16)
         ax.set_ylabel(r"$Z/D$", fontsize=16)
         ax.set_title(f"Visual Verification: Vortex Peak Centers & FWHM Ellipses (Step {timesteps[0]:.0f})", fontsize=16, pad=12)
@@ -263,7 +283,7 @@ def plot_all_standalone_figures(h5_path, output_dir="plots", exclude_tracks=None
         cbar.set_label(r"$Q\ [\mathrm{s}^{-2}]$", fontsize=16)
         plt.tight_layout()
         out6 = os.path.join(output_dir, "vortex_core_verification.png")
-        plt.savefig(out6, dpi=200)
+        safe_savefig(plt, out6, dpi=200)
         plt.close()
         print(f"  Saved {out6}")
 
@@ -275,8 +295,8 @@ def plot_all_standalone_figures(h5_path, output_dir="plots", exclude_tracks=None
     
     fig, ax = plt.subplots(figsize=(8, 7))
     im = ax.pcolormesh(X_rot, Z_rot, u_prime_norm0, cmap='RdBu_r', vmin=-1.0, vmax=1.0, shading='auto')
-    ax.set_xlim(piv_xlim)
-    ax.set_ylim(piv_ylim)
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
     ax.set_xlabel(r"$X/D$", fontsize=16)
     ax.set_ylabel(r"$Z/D$", fontsize=16)
     ax.set_title(rf"Instantaneous $u'/U_\infty$ (Step {step0_name})", fontsize=18, pad=12)
@@ -286,14 +306,14 @@ def plot_all_standalone_figures(h5_path, output_dir="plots", exclude_tracks=None
     cbar.set_label(r"$u'/U_\infty$", fontsize=16)
     plt.tight_layout()
     out7 = os.path.join(output_dir, f"u_prime_step_{step0_name}.png")
-    plt.savefig(out7, dpi=200)
+    safe_savefig(plt, out7, dpi=200)
     plt.close()
     print(f"  Saved {out7}")
 
     fig, ax = plt.subplots(figsize=(8, 7))
     im = ax.pcolormesh(X_rot, Z_rot, w_prime_norm0, cmap='RdBu_r', vmin=-1.0, vmax=1.0, shading='auto')
-    ax.set_xlim(piv_xlim)
-    ax.set_ylim(piv_ylim)
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
     ax.set_xlabel(r"$X/D$", fontsize=16)
     ax.set_ylabel(r"$Z/D$", fontsize=16)
     ax.set_title(rf"Instantaneous $w'/U_\infty$ (Step {step0_name})", fontsize=18, pad=12)
@@ -303,7 +323,7 @@ def plot_all_standalone_figures(h5_path, output_dir="plots", exclude_tracks=None
     cbar.set_label(r"$w'/U_\infty$", fontsize=16)
     plt.tight_layout()
     out8 = os.path.join(output_dir, f"w_prime_step_{step0_name}.png")
-    plt.savefig(out8, dpi=200)
+    safe_savefig(plt, out8, dpi=200)
     plt.close()
     print(f"  Saved {out8}")
 
@@ -377,9 +397,81 @@ def plot_all_standalone_figures(h5_path, output_dir="plots", exclude_tracks=None
 
             plt.tight_layout()
             out9 = os.path.join(output_dir, "vortex_1d_slices_verification.png")
-            plt.savefig(out9, dpi=200)
+            safe_savefig(plt, out9, dpi=200)
             plt.close()
             print(f"  Saved {out9}")
+
+    # ----------------------------------------------------
+    # 9. Phase-Averaged Q-Criterion at Agreed Rotor Phase
+    # ----------------------------------------------------
+    if has_q:
+        with h5py.File(h5_path, 'r') as hf_local:
+            if 'q_criterion/Q_snapshots' in hf_local:
+                Q_snapshots = hf_local['q_criterion/Q_snapshots'][:]
+            else:
+                Q_snapshots = None
+        
+        if Q_snapshots is not None and len(Q_snapshots) > 0:
+            target_phase = phase_step % period
+            matching_indices = [i for i, t in enumerate(timesteps) if int(round(t)) % period == target_phase]
+
+            if not matching_indices:
+                phase_diffs = [min(abs((int(round(t)) % period) - target_phase), period - abs((int(round(t)) % period) - target_phase)) for t in timesteps]
+                min_diff = min(phase_diffs)
+                matching_indices = [i for i, diff in enumerate(phase_diffs) if diff == min_diff]
+                print(f"Warning: Exact phase {target_phase} not found. Using closest available phase offset {min_diff} steps.")
+
+            matching_steps = [int(round(timesteps[i])) for i in matching_indices]
+            print(f"Generating phase_average_q.png for phase step {phase_step} (phase mod {period} = {target_phase})...")
+            print(f"  Averaging {len(matching_indices)} snapshot(s) at timestep(s): {matching_steps}")
+
+            import warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", category=RuntimeWarning)
+                if len(matching_indices) == 1:
+                    Q_phase_avg = Q_snapshots[matching_indices[0]]
+                    title_str = rf"Phase-Averaged $Q$-Criterion (Step {matching_steps[0]})"
+                else:
+                    Q_phase_avg = np.nanmean(Q_snapshots[matching_indices], axis=0)
+                    title_str = rf"Phase-Averaged $Q$-Criterion ($N={len(matching_indices)}$ Revs, Phase {target_phase})"
+
+            fig, ax = plt.subplots(figsize=(8, 7))
+            im = ax.pcolormesh(X_rot, Z_rot, Q_phase_avg, cmap='RdBu_r', vmin=-5e6, vmax=5e6, shading='auto')
+            ax.set_xlim(xlim)
+            ax.set_ylim(ylim)
+            ax.set_xlabel(r"$X/D$", fontsize=16)
+            ax.set_ylabel(r"$Z/D$", fontsize=16)
+            ax.set_title(title_str, fontsize=18, pad=12)
+            ax.tick_params(labelsize=14)
+            cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+            cbar.ax.tick_params(labelsize=14)
+            cbar.set_label(r"$Q\ [\mathrm{s}^{-2}]$", fontsize=16)
+            plt.tight_layout()
+            out_phase_q = os.path.join(output_dir, "phase_average_q.png")
+            safe_savefig(plt, out_phase_q, dpi=200)
+            plt.close()
+            print(f"  Saved {out_phase_q}")
+
+            # If multiple matching revolutions, also save the single instantaneous snapshot at the latest revolution
+            if len(matching_indices) > 1:
+                latest_idx = matching_indices[-1]
+                latest_step = matching_steps[-1]
+                fig, ax = plt.subplots(figsize=(8, 7))
+                im = ax.pcolormesh(X_rot, Z_rot, Q_snapshots[latest_idx], cmap='RdBu_r', vmin=-5e6, vmax=5e6, shading='auto')
+                ax.set_xlim(xlim)
+                ax.set_ylim(ylim)
+                ax.set_xlabel(r"$X/D$", fontsize=16)
+                ax.set_ylabel(r"$Z/D$", fontsize=16)
+                ax.set_title(rf"Instantaneous $Q$-Criterion (Step {latest_step})", fontsize=18, pad=12)
+                ax.tick_params(labelsize=14)
+                cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+                cbar.ax.tick_params(labelsize=14)
+                cbar.set_label(r"$Q\ [\mathrm{s}^{-2}]$", fontsize=16)
+                plt.tight_layout()
+                out_single_q = os.path.join(output_dir, f"q_criterion_step_{latest_step}.png")
+                safe_savefig(plt, out_single_q, dpi=200)
+                plt.close()
+                print(f"  Saved {out_single_q}")
 
     print("\nAll standalone figures generated successfully!")
 
@@ -389,7 +481,28 @@ if __name__ == "__main__":
     parser.add_argument("--outdir", type=str, default="plots", help="Directory to save generated PNG images")
     parser.add_argument("--exclude", nargs="*", default=None, help="List of tracks to exclude from trajectory plot (e.g. --exclude 3 or --exclude track_03 'Vortex 4')")
     parser.add_argument("--min_points", type=int, default=2, help="Minimum number of points required to plot a trajectory (default 2)")
+    parser.add_argument("--xlim", nargs=2, type=float, default=[-0.75, 0.75], help="X limits for spatial plots (default: -0.75 0.75)")
+    parser.add_argument("--ylim", nargs=2, type=float, default=[-0.75, 0.75], help="Z limits for spatial plots (default: -0.75 0.75)")
+    parser.add_argument("--piv_limits", action="store_true", help="Use experimental PIV camera limits (-0.30 to 0.08, -0.10 to 0.40) instead of full domain")
+    parser.add_argument("--phase_step", type=int, default=22207, help="Reference phase timestep to identify rotor phase angle (default 22207)")
+    parser.add_argument("--period", type=int, default=288, help="Rotor blade passing period in timesteps (default 288)")
     args = parser.parse_args()
     
-    plot_all_standalone_figures(args.h5, args.outdir, exclude_tracks=args.exclude, min_points=args.min_points)
+    if args.piv_limits:
+        plot_xlim = (-0.3, 0.08)
+        plot_ylim = (-0.1, 0.4)
+    else:
+        plot_xlim = args.xlim
+        plot_ylim = args.ylim
+
+    plot_all_standalone_figures(
+        args.h5, 
+        args.outdir, 
+        exclude_tracks=args.exclude, 
+        min_points=args.min_points,
+        xlim=plot_xlim,
+        ylim=plot_ylim,
+        phase_step=args.phase_step,
+        period=args.period
+    )
 

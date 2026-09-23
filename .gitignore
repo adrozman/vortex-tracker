@@ -6,3 +6,4 @@ __pycache__/
 */__pycache__/
 plots/
 !plots/*_prime_step_*.png
+plots_larger/
