@@ -5,5 +5,4 @@ experimental_figures_to_compare_to
 __pycache__/
 */__pycache__/
 plots/
-!plots/*_prime_step_*.png
-plots_larger/
+*.o*
